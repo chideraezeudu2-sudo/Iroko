@@ -81,22 +81,27 @@ npm run build && npm start   # production build + node server
 
 ## 7. Deployment
 
-**Frontend — Vercel (static Vite build):**
-- Framework preset: Vite. Build command `npm run build`, output dir `dist`.
-- If you split the backend out (recommended), set the frontend to call the backend
-  origin (e.g. set `VITE_API_URL` and point `apiFetch` at it). In this build the
-  frontend calls same-origin `/api/*`, so the Express backend must be reachable.
-- Env vars: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `GEMINI_API_KEY`,
-  `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`.
+This repo deploys as a **single Vercel project**: the Vite frontend is a static
+build and the Express routes are exposed as serverless functions under `/api/*`
+(see `api/`, `server/lib.ts`, `vercel.json`). No separate Render service needed.
 
-**Backend — Render (Express):**
-- Web Service, build `npm run build`, start `npm start`.
-- Env vars: `GEMINI_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `PORT`,
-  `APP_URL`.
-- Point the frontend's API calls at the Render URL (set `VITE_API_URL` and update
-  `src/lib/api.ts` base) — or host frontend + backend on the same origin.
+**Vercel (one project, frontend + API):**
+1. Push this repo to GitHub.
+2. In Vercel: **Add New → Project → Import** the GitHub repo. Vercel auto-detects
+   Vite (build command `vite build`, output `dist`) from `vercel.json`.
+3. In the project's **Settings → Environment Variables**, add (for *all*
+   environments — Production, Preview, Development):
+   - `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` (client, public)
+   - `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (server, secret)
+   - `GEMINI_API_KEY` (server, secret)
+   - `APP_URL` (your Vercel production URL, e.g. `https://your-app.vercel.app`)
+4. Deploy. Same-origin `/api/*` calls work out of the box.
 
-**Database/Auth — Supabase:** managed. Just run `supabase/schema.sql`.
+The same code also runs as a standalone Express server (`npm run build && npm start`,
+serving the built frontend + `/api/*` on one origin) if you prefer Render/Railway/etc.
+
+**Database/Auth — Supabase:** managed. Just run `supabase/schema.sql` (§3).
+
 
 ## 8. API reference
 

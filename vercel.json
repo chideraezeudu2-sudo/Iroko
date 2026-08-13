@@ -1,0 +1,14 @@
+{
+  "version": 2,
+  "buildCommand": "vite build",
+  "outputDirectory": "dist",
+  "framework": "vite",
+  "rewrites": [
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
+  ],
+  "functions": {
+    "api/extract.ts": { "maxDuration": 60 },
+    "api/compile-document.ts": { "maxDuration": 60 },
+    "api/chunk-action.ts": { "maxDuration": 60 }
+  }
+}

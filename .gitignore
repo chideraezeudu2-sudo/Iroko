@@ -4,3 +4,4 @@ dist
 .env.local
 *.log
 .agent_tmp
+.vercel
