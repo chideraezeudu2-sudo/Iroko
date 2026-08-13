@@ -1,0 +1,6 @@
+{
+  "name": "Iroko: Verbatim Fact & Entity Extractor",
+  "description": "Extract verbatim quotes, quantitative metrics, deadlines, and key decisions from unstructured text with zero generative hallucination.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
