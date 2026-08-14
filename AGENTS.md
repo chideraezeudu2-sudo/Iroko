@@ -25,6 +25,19 @@ Migrated from localStorage/fake-auth to Supabase Auth + Postgres.
 - `runExtraction` degrades gracefully: if DB tables are missing it still returns
   the extracted entities + a warning instead of failing the whole request.
 
+## Production deploy (Vercel)
+- Permanent project: `iroko` (id `prj_jTWVfSKQnYFbw0D3uKTFJRaO6vCD`), team
+  `team_oxWoB136qzKjEdAZobPzSVi0`. Production URL: `https://iroko-gamma.vercel.app`.
+- Deployed via API (POST /v11/projects) + env vars (POST /v10/projects/{id}/env,
+  type `encrypted`, targets production/preview/development) + `vercel deploy --prod`.
+- `iroko.vercel.app` was already taken by another account, so `iroko-gamma` is the
+  real production alias. `APP_URL` env var = `https://iroko-gamma.vercel.app`.
+- Env vars set on the project: VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY,
+  SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, GROQ_API_KEY, APP_URL.
+- Redeploy: `vercel deploy --prod --yes --token $VERCEL_TOKEN --name iroko`.
+- Supabase Google OAuth provider + site_url can ONLY be set via dashboard or a
+  Supabase PAT (`sbp_…`) — service-role key is rejected by the management API.
+
 ## Supabase project
 `woikicnksvylyiyjxnxl.supabase.co`. Email confirmation is ON by default, so
 `signUp` returns no session until the email link is clicked. `auth.admin.createUser`
