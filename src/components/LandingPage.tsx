@@ -342,13 +342,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate, onOpenAuth
               >
                 Privacy Policy
               </button>
-              <button
-                onClick={() => onNavigate('extract')}
-                className="text-blue-600 hover:text-blue-700 font-medium transition-colors"
-                id="footer-link-extract"
-              >
-                Workspace
-              </button>
             </div>
           </div>
         </div>

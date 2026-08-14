@@ -72,13 +72,6 @@ export const Navbar: React.FC<NavbarProps> = ({
           >
             Pricing
           </a>
-          <button
-            onClick={() => onNavigate('extract')}
-            className={`transition-colors hover:text-gray-900 ${currentPage === 'extract' ? 'text-blue-600 font-semibold' : ''}`}
-            id="nav-link-workspace"
-          >
-            Workspace
-          </button>
         </nav>
 
         {/* Action Controls */}

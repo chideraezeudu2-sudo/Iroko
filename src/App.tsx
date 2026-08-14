@@ -44,7 +44,7 @@ export const App: React.FC = () => {
     loadRecords();
   }, [loadRecords]);
 
-  // When auth state flips to authenticated, take the user into the workspace.
+  // When auth state flips to authenticated, take the user into the dashboard.
   useEffect(() => {
     if (isAuthenticated && currentPage === 'landing') {
       setCurrentPage('extract');
@@ -53,6 +53,18 @@ export const App: React.FC = () => {
       setActiveRecord(null);
     }
   }, [isAuthenticated, currentPage]);
+
+  // Auth guard: dashboard pages require authentication. If an unauthenticated
+  // user somehow lands on a dashboard route, bounce them to the landing page
+  // and prompt sign-in. The correct flow is landing → authenticate → dashboard.
+  useEffect(() => {
+    const dashboardPages: PageView[] = ['extract', 'history', 'settings'];
+    if (!isAuthenticated && !loading && dashboardPages.includes(currentPage)) {
+      setCurrentPage('landing');
+      setAuthMode('signin');
+      setShowAuthModal(true);
+    }
+  }, [isAuthenticated, loading, currentPage]);
 
   // Handlers
   const handleSaveRecord = async (newRecord: ExtractionRecord) => {

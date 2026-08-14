@@ -46,40 +46,16 @@ export const ExtractWorkspace: React.FC<ExtractWorkspaceProps> = ({
   onSaveRecord,
   hideWeakConfidence,
 }) => {
-  // Input state
+  // Input state — starts as a clean slate. No sample data is loaded; the user
+  // pastes their own text and runs an extraction.
   const [inputText, setInputText] = useState(
-    currentRecord?.rawInput ?? SAMPLE_PRESETS[0].text
+    currentRecord?.rawInput ?? ''
   );
   const [criteria, setCriteria] = useState('');
-  const [title, setTitle] = useState(currentRecord?.title || 'Drivetrain Subsystem Log');
+  const [title, setTitle] = useState(currentRecord?.title || 'New Extraction');
   const [isExtracting, setIsExtracting] = useState(false);
   const [entities, setEntities] = useState<ExtractedChunk[]>(
-    currentRecord?.entities || [
-      {
-        id: 'chunk-1',
-        category: 'PROGRESS METRIC',
-        verbatimText: 'The chassis build is 85% complete.',
-        score: 98,
-        level: 'strong',
-        note: 'Direct quantitative progress indicator',
-      },
-      {
-        id: 'chunk-2',
-        category: 'ISSUE RESOLUTION',
-        verbatimText: 'We ran into a minor issue with the motor controller calibration yesterday, but the firmware update resolved it this morning.',
-        score: 82,
-        level: 'partial',
-        note: 'Describes technical calibration fix and timing',
-      },
-      {
-        id: 'chunk-3',
-        category: 'TARGET DEADLINE',
-        verbatimText: 'The full assembly will be ready for field trials by Friday.',
-        score: 94,
-        level: 'strong',
-        note: 'Explicit milestone timeline',
-      },
-    ]
+    currentRecord?.entities || []
   );
 
   // Quote Selection & Document Builder State
