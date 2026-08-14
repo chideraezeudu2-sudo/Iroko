@@ -47,37 +47,70 @@ async function groqComplete(opts: GroqOptions): Promise<{ text: string; model: s
     { role: 'user' as const, content: opts.prompt },
   ];
   let lastError: any = null;
+  // Retry transient rate-limit / overload errors with exponential backoff.
+  const MAX_RETRIES = 3;
   for (const model of GROQ_MODELS) {
-    try {
-      const body: any = {
-        model,
-        messages,
-        temperature: opts.temperature ?? 0.2,
-        max_tokens: opts.maxTokens ?? 8192,
-      };
-      if (opts.jsonMode) body.response_format = { type: 'json_object' };
-      const res = await fetch(GROQ_URL, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) {
-        const errText = await res.text();
-        lastError = new Error(`Groq ${model} HTTP ${res.status}: ${errText.slice(0, 200)}`);
-        continue;
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        const body: any = {
+          model,
+          messages,
+          temperature: opts.temperature ?? 0.2,
+          max_tokens: opts.maxTokens ?? 8192,
+        };
+        if (opts.jsonMode) body.response_format = { type: 'json_object' };
+        const res = await fetch(GROQ_URL, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(body),
+        });
+        // Retry on rate-limit (429) and transient overload (503/529).
+        const retryable = res.status === 429 || res.status === 503 || res.status === 529;
+        if (retryable && attempt < MAX_RETRIES) {
+          const retryAfter = Number(res.headers.get('retry-after')) || (1.5 * (attempt + 1));
+          lastError = new Error(`Groq ${model} HTTP ${res.status} (retry ${attempt + 1}/${MAX_RETRIES})`);
+          await new Promise((r) => setTimeout(r, retryAfter * 1000));
+          continue;
+        }
+        if (!res.ok) {
+          const errText = await res.text();
+          lastError = new Error(`Groq ${model} HTTP ${res.status}: ${errText.slice(0, 200)}`);
+          break; // non-retryable error for this model; try next model
+        }
+        const data = await res.json();
+        const text = data?.choices?.[0]?.message?.content;
+        if (text) return { text, model };
+        lastError = new Error(`Groq ${model} returned empty content.`);
+      } catch (err: any) {
+        lastError = err;
+        if (attempt < MAX_RETRIES) {
+          await new Promise((r) => setTimeout(r, 1.5 * (attempt + 1) * 1000));
+          continue;
+        }
       }
-      const data = await res.json();
-      const text = data?.choices?.[0]?.message?.content;
-      if (text) return { text, model };
-      lastError = new Error(`Groq ${model} returned empty content.`);
-    } catch (err: any) {
-      lastError = err;
     }
   }
   throw lastError || new Error('All Groq model attempts failed.');
+}
+
+// Robustly parse JSON from an LLM response that may wrap it in markdown
+// fences or prepend/append prose. Extracts the outermost JSON object.
+function parseJsonLoose(raw: string): any {
+  if (!raw) return {};
+  let s = raw.trim();
+  // Strip ```json ... ``` or ``` ... ``` fences.
+  const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fence) s = fence[1].trim();
+  // Fallback: slice from first '{' to last '}'.
+  if (!s.startsWith('{')) {
+    const start = s.indexOf('{');
+    const end = s.lastIndexOf('}');
+    if (start !== -1 && end !== -1 && end > start) s = s.slice(start, end + 1);
+  }
+  return JSON.parse(s);
 }
 
 // ---------- Auth ----------
@@ -236,13 +269,30 @@ Output ONLY the JSON object, no prose. Example shape:
         temperature: 0.1,
       });
       modelUsed = model;
-      const parsed = JSON.parse(raw || '{}');
+      const parsed = parseJsonLoose(raw);
       entities = Array.isArray(parsed) ? parsed : (parsed.entities || parsed.array || []);
+      if (entities.length === 0) {
+        // Model returned valid JSON but no entities — treat as failure rather
+        // than silently substituting misleading keyword-matched chunks.
+        return {
+          status: 503,
+          json: {
+            error:
+              'The AI model could not extract verbatim chunks from this input. Please try again in a moment, or refine your text/criteria. (No fabricated fallback was used.)',
+          },
+        };
+      }
     } catch (err: any) {
       console.error('Groq extraction error:', err?.message || err);
-      entities = extractFallbackEntities(text);
-      modelUsed = 'heuristic-local-fallback';
-      warning = 'Live AI extraction failed. Deterministic verbatim extraction applied.';
+      // Do NOT fall back to the keyword heuristic — it produces misleading
+      // (wrong) categories for non-technical text. Surface a clear retry error.
+      return {
+        status: 503,
+        json: {
+          error:
+            'The AI service is temporarily busy (rate limit). Please wait a few seconds and try again. No fabricated fallback was used to avoid showing incorrect information.',
+        },
+      };
     }
   }
 
