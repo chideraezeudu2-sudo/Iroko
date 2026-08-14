@@ -9,9 +9,9 @@ Migrated from localStorage/fake-auth to Supabase Auth + Postgres.
   Dev uses Vite middleware (`tsx server.ts`); prod builds to `dist/server.cjs`.
   Serves SPA + `/api/*`.
 - `server/lib.ts` — single source of truth for backend logic: `getSupabase()`,
-  `verifyAuth()`, Groq client, heuristic fallbacks, and `runExtraction` /
-  `runCompileDocument` / `runChunkAction` handlers. Shared by both the Express
-  server and the Vercel serverless functions.
+  `verifyAuth()`, Groq client (`groqComplete`), heuristic fallbacks, and
+  `runExtraction` / `runCompileDocument` / `runChunkAction` handlers. Shared by
+  both the Express server and the Vercel serverless functions.
 - `api/` — Vercel serverless functions (`extract.ts`, `compile-document.ts`,
   `chunk-action.ts`, `health.ts`) wrapped by `api/_helpers.ts` (`withAuth`).
   They import from `server/lib.ts` and must use `.js` extensions on relative
@@ -50,6 +50,16 @@ API `/v1/projects/{ref}/database/query` needs a Supabase personal access token
 - Never commit `.env` / `dist` / `.vercel` (all in `.gitignore`).
 - Secrets: service role key + GROQ_API_KEY stay server-side only.
 - `vite-env.d.ts` declares `import.meta.env` types + `Window` globals.
+
+## Groq (AI provider)
+- Replaced Google Gemini with Groq (Llama models) via OpenAI-compatible
+  chat-completions endpoint (`https://api.groq.com/openai/v1/chat/completions`).
+- No SDK dependency — `groqComplete()` in `server/lib.ts` uses native `fetch`.
+- Models: `llama-3.3-70b-versatile` (primary) → `llama-3.1-8b-instant` (fallback).
+- `runExtraction` uses Groq JSON mode (`response_format: {type:'json_object'}`),
+  expecting `{"entities":[...]}`; tolerant parsing also accepts raw arrays or
+  `{array:[...]}`. `runCompileDocument` + `runChunkAction` use plain text output.
+- Env var: `GROQ_API_KEY` (server-side only). Get at console.groq.com/keys.
 
 ## Vercel deploy gotchas (learned the hard way)
 - Anonymous temporary deploys (`vercel deploy --env KEY=VAL`) DO propagate env
