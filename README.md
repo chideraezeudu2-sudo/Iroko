@@ -6,7 +6,7 @@ localStorage/fake-auth prototype with real, production infrastructure:
 - **Auth:** Supabase Auth (email/password + Google OAuth)
 - **Database:** Supabase Postgres with row-level security
 - **Backend:** Express (`server.ts`) — auth-gated, persists results, new chunk-action endpoint
-- **AI:** Google Gemini (verbatim extraction + compile-document + chunk actions)
+- **AI:** Groq (Llama models, verbatim extraction + compile-document + chunk actions)
 
 The existing React + Vite frontend UI and extraction flow are preserved; only the
 fake parts (localStorage, fake auth, fake Google account picker) were replaced.
@@ -17,7 +17,7 @@ fake parts (localStorage, fake auth, fake Google account picker) were replaced.
 
 - Node 18+
 - A Supabase project (URL + anon key + service role key)
-- A Google Gemini API key
+- A Groq API key (https://console.groq.com/keys)
 - (For Google Sign-In) a Google Cloud OAuth client — see §5
 
 ## 2. Install
@@ -49,7 +49,7 @@ Copy `.env.example` → `.env` and set:
 
 | Var | Where used | Notes |
 |-----|-----------|-------|
-| `GEMINI_API_KEY` | server | Server-side only. Required for AI extraction. |
+| `GROQ_API_KEY` | server | Server-side only. Required for AI extraction. |
 | `VITE_SUPABASE_URL` | frontend (bundled) | Public Supabase URL. |
 | `VITE_SUPABASE_ANON_KEY` | frontend (bundled) | Public anon key (safe in browser). |
 | `SUPABASE_URL` | server | Same Supabase URL. |
@@ -93,7 +93,7 @@ build and the Express routes are exposed as serverless functions under `/api/*`
    environments — Production, Preview, Development):
    - `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` (client, public)
    - `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (server, secret)
-   - `GEMINI_API_KEY` (server, secret)
+   - `GROQ_API_KEY` (server, secret)
    - `APP_URL` (your Vercel production URL, e.g. `https://your-app.vercel.app`)
 4. Deploy. Same-origin `/api/*` calls work out of the box.
 
@@ -109,12 +109,12 @@ All `/api/*` endpoints (except `/api/health`) require
 `Authorization: Bearer <supabase access_token>`.
 
 - `POST /api/extract` `{ text, criteria?, label }` → extracts verbatim chunks via
-  Gemini (heuristic fallback if no key), **persists** an `extraction_records` row +
+  Groq (heuristic fallback if no key), **persists** an `extraction_records` row +
   `extracted_chunks` rows, returns the persisted record with DB ids.
 - `POST /api/compile-document` `{ quotes, title?, format? }` → compiles selected
   verbatim quotes into a Markdown document (zero summarization).
 - `POST /api/chunk-action` `{ chunks? | chunkIds?, instruction, allChunksContext? }`
-  → sends the chunk(s) + the user's free-text instruction to Gemini and returns a
+  → sends the chunk(s) + the user's free-text instruction to Groq and returns a
   derived/modified result. Powers the per-chunk "Act" and bulk "Do something with
   N selected chunks" inputs in the Review Chunks screen.
 

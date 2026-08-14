@@ -1,4 +1,3 @@
-import { GoogleGenAI, Type } from '@google/genai';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 // Shared, framework-agnostic backend logic for Iroko.
@@ -24,18 +23,61 @@ export function getSupabase(): SupabaseClient {
   return _supabase;
 }
 
-// ---------- Gemini client ----------
-let ai: GoogleGenAI | null = null;
-function getGeminiClient(): GoogleGenAI {
-  if (!ai) {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) throw new Error('GEMINI_API_KEY is not configured.');
-    ai = new GoogleGenAI({
-      apiKey,
-      httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
-    });
+// ---------- Groq client (OpenAI-compatible chat completions) ----------
+//
+// Uses Groq's ultra-fast LPU inference via the OpenAI-compatible REST endpoint.
+// We call it with fetch (no extra SDK dependency). GROQ_API_KEY is server-side
+// only. Primary model: llama-3.3-70b-versatile; fallback: llama-3.1-8b-instant.
+const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
+const GROQ_MODELS = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'];
+
+interface GroqOptions {
+  systemInstruction?: string;
+  prompt: string;
+  jsonMode?: boolean;
+  temperature?: number;
+  maxTokens?: number;
+}
+
+async function groqComplete(opts: GroqOptions): Promise<{ text: string; model: string }> {
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) throw new Error('GROQ_API_KEY is not configured.');
+  const messages = [
+    ...(opts.systemInstruction ? [{ role: 'system' as const, content: opts.systemInstruction }] : []),
+    { role: 'user' as const, content: opts.prompt },
+  ];
+  let lastError: any = null;
+  for (const model of GROQ_MODELS) {
+    try {
+      const body: any = {
+        model,
+        messages,
+        temperature: opts.temperature ?? 0.2,
+        max_tokens: opts.maxTokens ?? 8192,
+      };
+      if (opts.jsonMode) body.response_format = { type: 'json_object' };
+      const res = await fetch(GROQ_URL, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const errText = await res.text();
+        lastError = new Error(`Groq ${model} HTTP ${res.status}: ${errText.slice(0, 200)}`);
+        continue;
+      }
+      const data = await res.json();
+      const text = data?.choices?.[0]?.message?.content;
+      if (text) return { text, model };
+      lastError = new Error(`Groq ${model} returned empty content.`);
+    } catch (err: any) {
+      lastError = err;
+    }
   }
-  return ai;
+  throw lastError || new Error('All Groq model attempts failed.');
 }
 
 // ---------- Auth ----------
@@ -158,12 +200,11 @@ export async function runExtraction(user: AuthUser, body: { text?: string; crite
   let modelUsed = 'heuristic-local-fallback';
   let warning: string | undefined;
 
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) {
     entities = extractFallbackEntities(text);
     warning = 'Live AI model was temporarily unavailable. Deterministic verbatim extraction applied.';
   } else {
-    const client = getGeminiClient();
     const prompt = `You are Iroko, a high-precision verbatim entity and factual extraction engine.
 CRITICAL MANDATE:
 Extract exact, word-for-word verbatim factual chunks from the source text below.
@@ -177,64 +218,31 @@ Source Text:
 ${text}
 """
 
-Return a JSON array of extracted entities. Each entity must have:
+Return a JSON object with a single key "entities" containing a JSON array of extracted entities. Each entity must have:
 - category: A concise uppercase category name (e.g. "PROGRESS METRIC", "ISSUE RESOLUTION", "TARGET DEADLINE", "DECISION", "ACTION ITEM", "TECHNICAL SPEC", "FINANCIAL FIGURE")
 - verbatimText: The exact substring quote from the text (MUST be word-for-word exact from the text)
 - score: Confidence score integer from 50 to 99 representing how directly verifiable and high-fidelity the chunk is
 - level: "strong" if score >= 85, "partial" if score is between 60 and 84, "weak" if score < 60
-- note: Brief technical note or context (e.g. "Direct quantitative progress indicator" or "Explicit milestone timeline")`;
+- note: Brief technical note or context (e.g. "Direct quantitative progress indicator" or "Explicit milestone timeline")
 
-    const responseSchema = {
-      type: Type.ARRAY,
-      items: {
-        type: Type.OBJECT,
-        properties: {
-          category: { type: Type.STRING },
-          verbatimText: { type: Type.STRING },
-          score: { type: Type.INTEGER },
-          level: { type: Type.STRING, enum: ['strong', 'partial', 'weak'] },
-          note: { type: Type.STRING },
-        },
-        required: ['category', 'verbatimText', 'score', 'level'],
-      },
-    };
-
-    const modelsToTry = ['gemini-3.1-flash-lite', 'gemini-3.7-flash', 'gemini-flash-latest'];
-    let response: any = null;
-    let lastError: any = null;
-
-    for (const currentModel of modelsToTry) {
-      try {
-        response = await client.models.generateContent({
-          model: currentModel,
-          contents: prompt,
-          config: {
-            systemInstruction: 'You are Iroko Verbatim Extractor. You extract exact verbatim text chunks from source documents without rewriting.',
-            responseMimeType: 'application/json',
-            responseSchema,
-          },
-        });
-        if (response && response.text) {
-          modelUsed = currentModel;
-          break;
-        }
-      } catch (err: any) {
-        lastError = err;
-        console.warn(`Model ${currentModel} error:`, err?.message || err);
-      }
-    }
-
-    if (!response || !response.text) {
-      throw lastError || new Error('All model attempts failed.');
-    }
+Output ONLY the JSON object, no prose. Example shape:
+{"entities":[{"category":"PROGRESS METRIC","verbatimText":"...","score":90,"level":"strong","note":"..."}]}`;
 
     try {
-      entities = JSON.parse(response.text || '[]');
-    } catch (parseError) {
-      console.error('Failed to parse Gemini output:', response.text);
+      const { text: raw, model } = await groqComplete({
+        systemInstruction: 'You are Iroko Verbatim Extractor. You extract exact verbatim text chunks from source documents without rewriting. Return only valid JSON.',
+        prompt,
+        jsonMode: true,
+        temperature: 0.1,
+      });
+      modelUsed = model;
+      const parsed = JSON.parse(raw || '{}');
+      entities = Array.isArray(parsed) ? parsed : (parsed.entities || parsed.array || []);
+    } catch (err: any) {
+      console.error('Groq extraction error:', err?.message || err);
       entities = extractFallbackEntities(text);
       modelUsed = 'heuristic-local-fallback';
-      warning = 'Live AI output could not be parsed. Deterministic verbatim extraction applied.';
+      warning = 'Live AI extraction failed. Deterministic verbatim extraction applied.';
     }
   }
 
@@ -374,7 +382,7 @@ export async function runCompileDocument(user: AuthUser, body: { quotes?: any[];
   }
 
   const docTitle = title || 'Verbatim Quotes Compilation';
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = process.env.GROQ_API_KEY;
 
   if (!apiKey) {
     const compiledDoc = localCompile(quotes, docTitle, format);
@@ -382,7 +390,6 @@ export async function runCompileDocument(user: AuthUser, body: { quotes?: any[];
   }
 
   try {
-    const client = getGeminiClient();
     const quotesList = quotes.map((q: any, idx: number) => `[Quote ${idx + 1} | ${q.category}]: "${q.verbatimText}"`).join('\n');
     const prompt = `You are a precision verbatim document compiler.
 YOUR ABSOLUTE MANDATE:
@@ -403,34 +410,18 @@ ${quotesList}
 
 Output the compiled document in clean Markdown formatting.`;
 
-    const modelsToTry = ['gemini-3.7-flash', 'gemini-3.1-flash-lite'];
-    let response: any = null;
-    let modelUsed = 'gemini-3.7-flash';
-
-    for (const currentModel of modelsToTry) {
-      try {
-        response = await client.models.generateContent({
-          model: currentModel,
-          contents: prompt,
-          config: {
-            systemInstruction: 'You compile verbatim quotes into structured Markdown documents without changing or summarizing a single word.',
-          },
-        });
-        if (response && response.text) {
-          modelUsed = currentModel;
-          break;
-        }
-      } catch (compileErr: any) {
-        console.warn(`Document compilation with ${currentModel} failed:`, compileErr?.message);
-      }
-    }
+    const { text, model } = await groqComplete({
+      systemInstruction: 'You compile verbatim quotes into structured Markdown documents without changing or summarizing a single word.',
+      prompt,
+      temperature: 0.3,
+    });
 
     return {
       status: 200,
       json: {
-        compiledText: response?.text?.trim() || quotes.map((q: any) => q.verbatimText).join('\n\n'),
+        compiledText: text.trim() || quotes.map((q: any) => q.verbatimText).join('\n\n'),
         quotesCount: quotes.length,
-        modelUsed,
+        modelUsed: model,
       },
     };
   } catch (err: any) {
@@ -472,7 +463,7 @@ export async function runChunkAction(
     return { status: 400, json: { error: 'No chunks provided to act on.' } };
   }
 
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = process.env.GROQ_API_KEY;
   const chunkList = targetChunks
     .map((c: any, idx: number) => `[Chunk ${idx + 1} | ${c.category || 'QUOTE'}]: "${c.verbatimText || c.verbatim_text}"${c.note ? ` (context: ${c.note})` : ''}`)
     .join('\n');
@@ -504,33 +495,17 @@ Respond with the result. Prefer clean Markdown.`;
   if (!apiKey) {
     resultText = localChunkAction(targetChunks, instruction);
   } else {
-    const client = getGeminiClient();
-    const modelsToTry = ['gemini-3.7-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
-    let response: any = null;
-    let lastError: any = null;
-    for (const currentModel of modelsToTry) {
-      try {
-        response = await client.models.generateContent({
-          model: currentModel,
-          contents: prompt,
-          config: {
-            systemInstruction: 'You act on exact verbatim chunks per the user instruction, never fabricating unsupported facts.',
-          },
-        });
-        if (response && response.text) {
-          modelUsed = currentModel;
-          break;
-        }
-      } catch (err: any) {
-        lastError = err;
-        console.warn(`Chunk action ${currentModel} error:`, err?.message);
-      }
-    }
-    if (!response || !response.text) {
-      if (lastError) throw lastError;
+    try {
+      const { text, model } = await groqComplete({
+        systemInstruction: 'You act on exact verbatim chunks per the user instruction, never fabricating unsupported facts.',
+        prompt,
+        temperature: 0.3,
+      });
+      resultText = text.trim();
+      modelUsed = model;
+    } catch (err: any) {
+      console.warn('Chunk action Groq error:', err?.message);
       resultText = localChunkAction(targetChunks, instruction);
-    } else {
-      resultText = response.text.trim();
     }
   }
 

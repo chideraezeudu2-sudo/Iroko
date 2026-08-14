@@ -1,7 +1,7 @@
 # Iroko — Repository Notes
 
 ## Stack
-React + Vite + Express (Vite middleware in `server.ts`) + Google Gemini.
+React + Vite + Express (Vite middleware in `server.ts`) + Groq (Llama models via OpenAI-compatible API).
 Migrated from localStorage/fake-auth to Supabase Auth + Postgres.
 
 ## Architecture
@@ -9,7 +9,7 @@ Migrated from localStorage/fake-auth to Supabase Auth + Postgres.
   Dev uses Vite middleware (`tsx server.ts`); prod builds to `dist/server.cjs`.
   Serves SPA + `/api/*`.
 - `server/lib.ts` — single source of truth for backend logic: `getSupabase()`,
-  `verifyAuth()`, Gemini client, heuristic fallbacks, and `runExtraction` /
+  `verifyAuth()`, Groq client, heuristic fallbacks, and `runExtraction` /
   `runCompileDocument` / `runChunkAction` handlers. Shared by both the Express
   server and the Vercel serverless functions.
 - `api/` — Vercel serverless functions (`extract.ts`, `compile-document.ts`,
@@ -48,7 +48,7 @@ API `/v1/projects/{ref}/database/query` needs a Supabase personal access token
 
 ## Conventions
 - Never commit `.env` / `dist` / `.vercel` (all in `.gitignore`).
-- Secrets: service role key + GEMINI_API_KEY stay server-side only.
+- Secrets: service role key + GROQ_API_KEY stay server-side only.
 - `vite-env.d.ts` declares `import.meta.env` types + `Window` globals.
 
 ## Vercel deploy gotchas (learned the hard way)
